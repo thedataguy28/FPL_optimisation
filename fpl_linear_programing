@@ -1,0 +1,99 @@
+import math
+import numpy as np
+import pandas as pd
+import requests
+import statsmodels.formula.api as smf
+import sklearn as sk
+from pandas import Series, DataFrame
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+import pulp
+from pulp import *
+
+
+# This section is to download the latest API data from fpl website
+# fpl_events_url = 'https://fantasy.premierleague.com/api/bootstrap-static/'
+# fpl_events_resp = requests.get(fpl_events_url)
+# fpl_events_json = fpl_events_resp.json()
+# df_elements = DataFrame(fpl_events_json['elements'])
+# df_elements.to_csv('elements_9nov')
+# print(df_elements.head())
+#
+# base_data = pd.read_csv('elements_9nov')
+# print(base_data.columns)
+# df = pd.DataFrame(base_data)
+# df['Player_name'] = df['first_name']+df['second_name']
+# print(df.head())
+#
+# new_table = df[['Player_name','now_cost','ep_this','team','element_type']]
+# new_table.to_csv('player_data')
+
+
+df = pd.read_csv("player_data")
+# Create a PuLP optimization problem
+model = LpProblem("FPL_Team_Selection",LpMaximize)
+
+# Variables: Binary variable indicating whether a player is selected or not
+players = df.index
+
+player_vars = LpVariable.dicts("Player", players, cat="Binary")
+
+
+
+def add_player_constraints(model, players):
+    # Objective constraint
+    model += lpSum([df['ep_this'][i] for i in players])
+
+    # Total budget constraints
+    model += lpSum(df['now_cost'][i] * player_vars[i] for i in players) <= 820
+    model += lpSum(df['now_cost'][i] * player_vars[i] for i in players) >= 800
+
+
+    # Position constraints
+    model += lpSum(player_vars[i] for i in players if df['position'][i] == 1) ==1
+    model += lpSum(player_vars[i] for i in players if df['position'][i] == 2) <= 5
+    model += lpSum(player_vars[i] for i in players if df['position'][i] == 2) >= 3
+    model += lpSum(player_vars[i] for i in players if df['position'][i] == 3) <= 5
+    model += lpSum(player_vars[i] for i in players if df['position'][i] == 3) >= 3
+    model += lpSum(player_vars[i] for i in players if df['position'][i] == 4) >= 1
+    model += lpSum(player_vars[i] for i in players if df['position'][i] == 4) <= 3
+
+   # Exactly 11 players must be selected
+    model += lpSum(player_vars[i] for i in players) == 11
+
+    # Exclude specific players from the team
+    for player in players:
+        if df['ep_this'][player] <5:
+            model += player_vars[player] == 0
+
+    # No more than 3 players from a single team
+    selected_players_per_team = dict()
+    for player in players:
+        team_name = df['team'][player]
+        if team_name in selected_players_per_team.keys():
+            selected_players_per_team[team_name].append(player)
+        else:
+            selected_players_per_team[team_name] = []
+            selected_players_per_team[team_name].append(player)
+
+    for team, selected_players in selected_players_per_team.items():
+        model += lpSum(player_vars[i] for i in selected_players) <= 3
+
+
+
+
+# Add all player constraints
+add_player_constraints(model, players)
+
+# Solve the optimization problem
+model.solve()
+
+# Get the recommended players
+recommended_players = [i for i in players if player_vars[i].varValue == 1]
+
+
+# Print the recommended players and their positions
+for player in recommended_players:
+    print(
+        f"Player: {df['Player'][player]}, Position: {df['position'][player]}, Predicted Points: {df['ep_this'][player]}, "
+        f"Value: {df['now_cost'][player]}")
