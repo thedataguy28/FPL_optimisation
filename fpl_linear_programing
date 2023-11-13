@@ -54,7 +54,7 @@ def add_player_constraints(model, players):
 
     # Exclude specific players from the team
     for player in players:
-        if df['ep_this'][player] <5:
+        if df['ep_this'][player] <3:
             model += player_vars[player] == 0
 
     # No more than 3 players from a single team
